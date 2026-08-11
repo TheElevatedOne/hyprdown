@@ -27,7 +27,7 @@ in
 
   hyprshutdown = final: prev: {
     hyprshutdown = prev.callPackage ./default.nix {
-      stdenv = prev.gcc15Stdenv;
+      stdenv = prev.gcc16Stdenv;
       version =
         version
         + "+date="
