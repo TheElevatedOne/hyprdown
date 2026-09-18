@@ -1,3 +1,5 @@
 hyprdown
-src/*.o
 *.o
+
+build
+dist
