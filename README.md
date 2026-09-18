@@ -2,7 +2,8 @@
 
 A CLI counterpart to [hyprshutdown](https://github.com/hyprwm/hyprshutdown) for Hyprland.
 
-![Static Badge](https://img.shields.io/badge/Vibecoded-Grok-black?style=for-the-badge&labelColor=%236F0E82)
+![AUR Version](https://img.shields.io/aur/version/hyprdown-bin?style=for-the-badge&logo=archlinux)
+ ![Static Badge](https://img.shields.io/badge/Vibecoded-Grok-black?style=for-the-badge&labelColor=%236F0E82)
 
 It asks every client to close and waits a limited time (5 seconds by default). Apps that ignore the close request are not waited on forever. With no action, Hyprland is then exited. With `-s`, `-r`, `-l`, or `-c`, that action runs after clients close — Hyprland is not exited first.
 
