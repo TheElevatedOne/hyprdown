@@ -1,6 +1,6 @@
 # hyprdown
 
-![Static Badge](https://img.shields.io/badge/CLAUDE-VIBECODED?style=for-the-badge&logo=claude&label=VIBECODED&labelColor=%23333333&color=%23de7356) [![AUR Version](https://img.shields.io/aur/version/hyprdown-bin?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/hyprdown-bin)
+![Static Badge](https://img.shields.io/badge/CLAUDE-VIBECODED?style=for-the-badge&logo=claude&label=VIBECODED&labelColor=%23333333&color=%23de7356) [![AUR Version](https://img.shields.io/aur/version/hyprdown-bin?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/hyprdown-bin) [![AUR Version](https://img.shields.io/aur/version/hyprdown-git?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/hyprdown-git)
 
 Closes every app running under Hyprland without asking you anything, then exits Hyprland, powers off, reboots, logs out or runs your own command. It's a CLI counterpart to [hyprshutdown](https://github.com/hyprwm/hyprshutdown), with no UI.
 
@@ -28,7 +28,7 @@ hyprdown -s    # close everything, then power off
 | Package | Install | Builds from |
 | --- | --- | --- |
 | [`hyprdown-bin`](https://aur.archlinux.org/packages/hyprdown-bin) | `paru -S hyprdown-bin` | Release binary |
-| `hyprdown-git` | `makepkg -si` in [`aur/hyprdown-git`](aur/hyprdown-git) (not on the AUR yet) | `main` branch |
+| [`hyprdown-git`](https://aur.archlinux.org/packages/hyprdown-git) | `paru -S hyprdown-git` | `main` branch |
 
 ### Release tarball
 
