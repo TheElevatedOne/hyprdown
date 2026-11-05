@@ -13,7 +13,7 @@ hyprdown -s    # close everything, then power off
 1. **Collect**: client windows (`j/clients`), layer-shell clients such as bars and wallpapers (`j/layers`), and direct children of the compositor.
 2. **Close windows**: each window is asked to close through `hl.dsp.window.close`, and again every second while it stays open. Windows that appear during the shutdown are closed too.
 3. **SIGTERM**: a process gets one SIGTERM once it has no windows left. An app that had windows gets 1 second to exit by itself first.
-4. **SIGKILL**: whatever is still running after the timeout (5 seconds by default) is killed.
+4. **Timeout**: whatever is still running after the timeout (5 seconds by default) gets SIGTERM, then SIGKILL 1 second later.
 5. **Action**: Hyprland is exited, or the action you asked for runs. With an action, Hyprland is not exited first.
 
 **Never signalled**: Hyprland, Xwayland, `start-hyprland`, `uwsm`, hyprdown itself, pid 1 and other users' processes. Processes are tracked by pid and start time, so a reused pid is never hit.
@@ -68,7 +68,7 @@ hyprdown -c 'my-script.sh'   # close apps, then run a command
 | `-r`, `--reboot` | Reboot |
 | `-l`, `--logout` | Terminate the login session |
 | `-c`, `--command CMD` | Run `CMD` through `sh -c` after apps close |
-| `-t`, `--timeout SECS` | Seconds to wait for apps. Default 5, or `timeout` from the config. `0` kills what is left right away |
+| `-t`, `--timeout SECS` | Seconds to wait for apps. Default 5, or `timeout` from the config. `0` skips the wait |
 | `-n`, `--dry-run` | List windows and processes that would be closed, then exit |
 | `--no-fork` | Stay in the foreground and log to stderr |
 

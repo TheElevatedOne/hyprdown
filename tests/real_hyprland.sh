@@ -17,11 +17,12 @@ hyprland=$!
 trap 'kill -9 "$hyprland" 2>/dev/null || true; tail -30 "$work/hyprland.out" || true; tail -30 "$XDG_STATE_HOME/hyprdown/hyprdown.log" 2>/dev/null || true' EXIT
 
 for _ in $(seq 100); do
-  HYPRLAND_INSTANCE_SIGNATURE=$(ls "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1)
+  HYPRLAND_INSTANCE_SIGNATURE=$(ls "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1 || true)
   [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] && [ -S "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock" ] && break
   sleep 0.2
 done
 export HYPRLAND_INSTANCE_SIGNATURE
+[ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || { echo "Hyprland did not start"; exit 1; }
 hyprctl version | head -1
 hyprctl output create headless HEADLESS-1 || true
 

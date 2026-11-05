@@ -443,9 +443,28 @@ int session_close(struct Session *s, unsigned timeout_sec) {
         return 0;
     }
 
-    fprintf(stderr, "hyprdown: timeout after %us, killing what is left\n", timeout_sec);
+    fprintf(stderr, "hyprdown: timeout after %us, terminating what is left\n", timeout_sec);
     print_remaining(s, 0);
 
+    /* An app stuck on an open window (e.g. an unsaved changes dialog) has not
+     * had SIGTERM yet, and SIGTERM is its last chance to save anything. */
+    for (size_t i = 0; i < s->nprocs; i++) {
+        struct Proc *p = &s->procs[i];
+        if (p->alive && !p->termed) {
+            proc_signal(p, SIGTERM);
+            p->termed = 1;
+        }
+    }
+
+    const double term_deadline = monotonic_now() + TERM_GRACE;
+    while (remaining > 0 && monotonic_now() < term_deadline) {
+        sleep_ms(POLL_INTERVAL_MS);
+        remaining = refresh(s);
+    }
+    if (remaining == 0)
+        return 1;
+
+    fprintf(stderr, "hyprdown: killing what is left\n");
     for (size_t i = 0; i < s->nprocs; i++) {
         if (s->procs[i].alive)
             proc_signal(&s->procs[i], SIGKILL);
