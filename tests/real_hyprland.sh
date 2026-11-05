@@ -14,7 +14,7 @@ echo 'hl.config({ misc = { disable_hyprland_logo = true } })' > "$work/test.lua"
 
 HYPRLAND_HEADLESS_ONLY=1 Hyprland --config "$work/test.lua" > "$work/hyprland.out" 2>&1 &
 hyprland=$!
-trap 'kill -9 "$hyprland" 2>/dev/null || true; tail -30 "$work/hyprland.out" || true; tail -30 "$XDG_STATE_HOME/hyprdown/hyprdown.log" 2>/dev/null || true' EXIT
+trap 'kill -9 "$hyprland" 2>/dev/null || true; tail -60 "$work/hyprland.out" || true; tail -30 "$XDG_STATE_HOME/hyprdown/hyprdown.log" 2>/dev/null || true' EXIT
 
 for _ in $(seq 100); do
   HYPRLAND_INSTANCE_SIGNATURE=$(ls "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1 || true)
