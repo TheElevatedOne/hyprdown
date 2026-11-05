@@ -1,0 +1,93 @@
+name: Build and release
+
+# Manual only: Actions -> "Build and release" -> Run workflow.
+# Builds the version declared in the Makefile and publishes it as release
+# <version> (no "v" prefix). Re-running for the same version replaces the
+# release assets. TheElevatedOne/AUR-PKGBUILDs follows the latest release, so
+# hyprdown-<version>-linux.tar.gz has to keep its name and flat layout.
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: Mark the release as a pre-release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  build:
+    name: Build (x86_64 Linux)
+    needs: test
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc make pkg-config libjson-c-dev libsystemd-dev
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(sed -n 's/^VERSION ?= //p' Makefile)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building hyprdown $version"
+
+      - name: Build
+        run: make
+
+      - name: Smoke test
+        run: test "$(./dist/hyprdown --version)" = "hyprdown ${{ steps.version.outputs.version }}"
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum "hyprdown-${{ steps.version.outputs.version }}-linux.tar.gz" > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hyprdown-${{ steps.version.outputs.version }}
+          path: |
+            dist/hyprdown-${{ steps.version.outputs.version }}-linux.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hyprdown-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          tag="$VERSION"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag exists, replacing its assets"
+            gh release upload "$tag" dist/* --clobber
+          else
+            flags=()
+            [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
+            gh release create "$tag" dist/* \
+              --target "$GITHUB_SHA" \
+              --title "hyprdown $VERSION" \
+              --generate-notes \
+              "${flags[@]}"
+          fi

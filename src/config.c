@@ -145,6 +145,38 @@ static int ensure_config_file(char **out_path) {
     return 0;
 }
 
+int log_open(char **out_path) {
+    const char *state = getenv("XDG_STATE_HOME");
+    char *dir = NULL;
+    int rc;
+
+    *out_path = NULL;
+    if (state && state[0] != '\0') {
+        rc = asprintf(&dir, "%s/hyprdown", state);
+    } else {
+        const char *home = home_dir();
+        if (!home)
+            return -1;
+        rc = asprintf(&dir, "%s/.local/state/hyprdown", home);
+    }
+    if (rc < 0)
+        return -1;
+
+    if (mkdir_p(dir, 0700) < 0 || asprintf(out_path, "%s/hyprdown.log", dir) < 0) {
+        *out_path = NULL;
+        free(dir);
+        return -1;
+    }
+    free(dir);
+
+    int fd = open(*out_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
+        free(*out_path);
+        *out_path = NULL;
+    }
+    return fd;
+}
+
 static char *trim(char *s) {
     char *end;
 

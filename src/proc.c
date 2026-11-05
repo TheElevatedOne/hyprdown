@@ -2,78 +2,67 @@
 
 #include <ctype.h>
 #include <dirent.h>
-#include <errno.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <sys/stat.h>
 
-int proc_alive(pid_t pid) {
-    if (pid <= 0)
-        return 0;
-    if (kill(pid, 0) == 0)
-        return 1;
-    return errno == EPERM;
-}
-
-pid_t proc_ppid(pid_t pid) {
+/* Parse /proc/<pid>/stat. comm may contain spaces and parentheses, so fields
+ * are read after the last ')'. */
+int proc_info(pid_t pid, struct ProcInfo *out) {
     char path[64];
+    char buf[1024];
+    struct stat st;
     FILE *fp;
-    char line[256];
-    pid_t ppid = -1;
+    size_t n;
 
-    if (pid <= 0)
+    if (pid <= 0 || !out)
         return -1;
 
-    snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
+    memset(out, 0, sizeof(*out));
+
+    snprintf(path, sizeof(path), "/proc/%d", (int)pid);
+    if (stat(path, &st) < 0)
+        return -1;
+    out->uid = st.st_uid;
+
+    snprintf(path, sizeof(path), "/proc/%d/stat", (int)pid);
     fp = fopen(path, "r");
     if (!fp)
         return -1;
-
-    while (fgets(line, sizeof(line), fp)) {
-        if (strncmp(line, "PPid:", 5) != 0)
-            continue;
-        ppid = (pid_t)strtol(line + 5, NULL, 10);
-        break;
-    }
-
+    n = fread(buf, 1, sizeof(buf) - 1, fp);
     fclose(fp);
-    return ppid;
-}
+    if (n == 0)
+        return -1;
+    buf[n] = '\0';
 
-int proc_comm(pid_t pid, char *buf, size_t buflen) {
-    char path[64];
-    FILE *fp;
-    char line[256];
-    int ok = -1;
-
-    if (!buf || buflen == 0 || pid <= 0)
+    char *open = strchr(buf, '(');
+    char *close = strrchr(buf, ')');
+    if (!open || !close || close < open)
         return -1;
 
-    buf[0] = '\0';
-    snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
-    fp = fopen(path, "r");
-    if (!fp)
-        return -1;
+    size_t comm_len = (size_t)(close - open - 1);
+    if (comm_len >= sizeof(out->comm))
+        comm_len = sizeof(out->comm) - 1;
+    memcpy(out->comm, open + 1, comm_len);
+    out->comm[comm_len] = '\0';
 
-    while (fgets(line, sizeof(line), fp)) {
-        if (strncmp(line, "Name:", 5) != 0)
-            continue;
-        char *name = line + 5;
-        while (*name == ' ' || *name == '\t')
-            name++;
-        size_t len = strcspn(name, "\r\n");
-        if (len >= buflen)
-            len = buflen - 1;
-        memcpy(buf, name, len);
-        buf[len] = '\0';
-        ok = 0;
-        break;
+    /* Fields after comm: 3 state, 4 ppid, ..., 22 starttime. */
+    char *p = close + 1;
+    int field = 3;
+    char *save = NULL;
+    for (char *tok = strtok_r(p, " ", &save); tok; tok = strtok_r(NULL, " ", &save), field++) {
+        if (field == 3)
+            out->state = tok[0];
+        else if (field == 4)
+            out->ppid = (pid_t)strtol(tok, NULL, 10);
+        else if (field == 22) {
+            out->starttime = strtoull(tok, NULL, 10);
+            return 0;
+        }
     }
 
-    fclose(fp);
-    return ok;
+    return -1;
 }
 
 int proc_collect_children(pid_t parent, pid_t *out, size_t cap) {
@@ -88,23 +77,19 @@ int proc_collect_children(pid_t parent, pid_t *out, size_t cap) {
     if (!dir)
         return 0;
 
-    while ((ent = readdir(dir)) != NULL) {
-        pid_t pid;
+    while (n < cap && (ent = readdir(dir)) != NULL) {
+        struct ProcInfo info;
         char *end = NULL;
 
         if (!isdigit((unsigned char)ent->d_name[0]))
             continue;
 
-        pid = (pid_t)strtol(ent->d_name, &end, 10);
+        pid_t pid = (pid_t)strtol(ent->d_name, &end, 10);
         if (!end || *end != '\0' || pid <= 0)
             continue;
-        if (proc_ppid(pid) != parent)
+        if (proc_info(pid, &info) < 0 || info.ppid != parent)
             continue;
-        if (n < cap)
-            out[n] = pid;
-        n++;
-        if (n >= cap)
-            break;
+        out[n++] = pid;
     }
 
     closedir(dir);

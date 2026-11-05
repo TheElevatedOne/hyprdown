@@ -1,0 +1,34 @@
+# Maintainer: TheElevatedOne <adam.mlady@elevated.ovh>
+
+pkgname=hyprdown-bin
+_pkgname=hyprdown
+pkgver=0.3.0
+pkgrel=1
+pkgdesc='Close every app running under Hyprland without user input, then exit, power off, reboot or log out (prebuilt)'
+arch=('x86_64')
+url='https://github.com/TheElevatedOne/hyprdown'
+license=('BSD-3-Clause')
+depends=(
+  'glibc'
+  'json-c'
+  'systemd'
+  'systemd-libs'
+)
+provides=("$_pkgname=$pkgver")
+conflicts=("$_pkgname")
+# Built by the upstream release workflow.
+options=('!debug')
+source=(
+  "$_pkgname-$pkgver-linux.tar.gz::$url/releases/download/$pkgver/$_pkgname-$pkgver-linux.tar.gz"
+  "LICENSE-$pkgver::https://raw.githubusercontent.com/TheElevatedOne/$_pkgname/refs/tags/$pkgver/LICENSE"
+  "README-$pkgver.md::https://raw.githubusercontent.com/TheElevatedOne/$_pkgname/refs/tags/$pkgver/README.md"
+)
+sha256sums=('SKIP'
+            'SKIP'
+            'SKIP')
+
+package() {
+  install -Dm755 "$_pkgname" -t "$pkgdir/usr/bin"
+  install -Dm644 "README-$pkgver.md" "$pkgdir/usr/share/doc/$_pkgname/README.md"
+  install -Dm644 "LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

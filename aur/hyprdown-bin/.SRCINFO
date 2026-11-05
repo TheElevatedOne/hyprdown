@@ -1,0 +1,22 @@
+pkgbase = hyprdown-bin
+	pkgdesc = Close every app running under Hyprland without user input, then exit, power off, reboot or log out (prebuilt)
+	pkgver = 0.3.0
+	pkgrel = 1
+	url = https://github.com/TheElevatedOne/hyprdown
+	arch = x86_64
+	license = BSD-3-Clause
+	depends = glibc
+	depends = json-c
+	depends = systemd
+	depends = systemd-libs
+	provides = hyprdown=0.3.0
+	conflicts = hyprdown
+	options = !debug
+	source = hyprdown-0.3.0-linux.tar.gz::https://github.com/TheElevatedOne/hyprdown/releases/download/0.3.0/hyprdown-0.3.0-linux.tar.gz
+	source = LICENSE-0.3.0::https://raw.githubusercontent.com/TheElevatedOne/hyprdown/refs/tags/0.3.0/LICENSE
+	source = README-0.3.0.md::https://raw.githubusercontent.com/TheElevatedOne/hyprdown/refs/tags/0.3.0/README.md
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+
+pkgname = hyprdown-bin

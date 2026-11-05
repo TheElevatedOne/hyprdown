@@ -5,10 +5,11 @@
 #include <sys/types.h>
 
 #ifndef HYPRDOWN_VERSION
-#define HYPRDOWN_VERSION "0.2.0"
+#define HYPRDOWN_VERSION "0.3.0"
 #endif
 
 #define HYPRDOWN_DEFAULT_TIMEOUT 5
+#define HYPRDOWN_MAX_PROTECTED 64
 
 enum Action {
     ACTION_NONE = 0,
@@ -22,6 +23,8 @@ struct Options {
     enum Action action;
     unsigned timeout_sec;
     char *command;
+    int no_fork;
+    int dry_run;
 };
 
 struct Config {
@@ -32,24 +35,50 @@ struct Config {
     int has_timeout;
 };
 
-struct App {
+/* A Hyprland client window, closed through the compositor. */
+struct Window {
     char *address;
     char *class_name;
     char *title;
     pid_t pid;
-    int is_layer;
-    int always_signal;
+    int present;
+    int warned;
 };
 
-struct AppList {
-    struct App *items;
-    size_t count;
-    size_t cap;
+/* A process that must exit: window owners, layer-shell clients and direct
+ * children of the compositor. Identified by pid + start time so a reused pid
+ * is never signalled. */
+struct Proc {
+    pid_t pid;
+    unsigned long long starttime;
+    char *name;
+    int termed;
+    int alive;
+    int had_window;
+    double windows_gone_at;
 };
 
-struct Hyprland {
+struct Session {
     int use_lua;
     pid_t compositor_pid;
+    pid_t protected_pids[HYPRDOWN_MAX_PROTECTED];
+    size_t nprotected;
+
+    struct Window *windows;
+    size_t nwindows;
+    size_t capwindows;
+
+    struct Proc *procs;
+    size_t nprocs;
+    size_t capprocs;
+};
+
+struct ProcInfo {
+    pid_t ppid;
+    uid_t uid;
+    char state;
+    unsigned long long starttime;
+    char comm[64];
 };
 
 /* args / usage */
@@ -60,28 +89,28 @@ int parse_args(int argc, char **argv, struct Options *opt, unsigned default_time
 /* config: $XDG_CONFIG_HOME/hyprdown/config.toml or $HOME/.config/hyprdown/config.toml */
 int config_init(struct Config *cfg);
 void config_free(struct Config *cfg);
+/* opens $XDG_STATE_HOME/hyprdown/hyprdown.log or $HOME/.local/state/hyprdown/hyprdown.log */
+int log_open(char **out_path);
 
 /* Hyprland IPC */
-char *hypr_socket_path(void);
 char *hypr_request(const char *cmd, char **err);
 int hypr_detect_lua(void);
 int hypr_compositor_pid(pid_t *out_pid);
+char *hypr_close_window(const char *address, int use_lua);
+int hypr_exit(int use_lua);
+void hypr_notify_error(const char *message);
 
-/* apps */
-void apps_free(struct AppList *list);
-int apps_collect(struct AppList *list, const struct Hyprland *hl);
-void apps_quit(const struct AppList *list, int use_lua);
-void apps_kill(const struct AppList *list);
-int apps_refresh(struct AppList *list);
-int apps_wait(struct AppList *list, unsigned timeout_sec, int use_lua);
+/* session: collect, close and wait for apps */
+int session_collect(struct Session *s);
+void session_print(const struct Session *s);
+int session_close(struct Session *s, unsigned timeout_sec);
+void session_free(struct Session *s);
 
 /* power / session actions */
 int run_action(enum Action action, const char *command, const struct Config *cfg);
 
 /* process helpers */
-int proc_alive(pid_t pid);
-pid_t proc_ppid(pid_t pid);
-int proc_comm(pid_t pid, char *buf, size_t buflen);
+int proc_info(pid_t pid, struct ProcInfo *out);
 int proc_collect_children(pid_t parent, pid_t *out, size_t cap);
 
 #endif

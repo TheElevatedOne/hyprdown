@@ -1,0 +1,48 @@
+name: Test
+
+# hyprdown powers machines off, so it only ever runs here, on throwaway runners.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+jobs:
+  fake-compositor:
+    name: Fake compositor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc make pkg-config libjson-c-dev libsystemd-dev
+
+      - name: Build
+        run: make CFLAGS="-O2 -g -Werror"
+
+      - name: Run tests
+        run: python3 -I tests/run_tests.py dist/hyprdown
+
+  real-hyprland:
+    name: Real Hyprland (headless)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Hyprland
+        run: pacman -Syu --noconfirm hyprland foot mesa json-c python ttf-dejavu
+
+      - name: Build
+        run: make
+
+      - name: Run test
+        run: |
+          useradd -m tester
+          chown -R tester .
+          runuser -u tester -- env GITHUB_ACTIONS=true LIBGL_ALWAYS_SOFTWARE=1 bash tests/real_hyprland.sh dist/hyprdown

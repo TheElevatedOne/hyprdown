@@ -1,6 +1,7 @@
 #include "hyprdown.h"
 
 #include <errno.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,10 @@ static int run_argv(char *const argv[]) {
         return -1;
     }
     if (pid == 0) {
+        /* Ignored signals survive exec; the action must not inherit ours. */
+        signal(SIGHUP, SIG_DFL);
+        signal(SIGPIPE, SIG_DFL);
+        signal(SIGTERM, SIG_DFL);
         execvp(argv[0], argv);
         fprintf(stderr, "hyprdown: exec %s: %s\n", argv[0], strerror(errno));
         _exit(127);

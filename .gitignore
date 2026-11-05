@@ -3,3 +3,12 @@ hyprdown
 
 build
 dist
+
+# makepkg output in aur/*
+/aur/*/src/
+/aur/*/pkg/
+/aur/*/hyprdown/
+/aur/*/*.pkg.tar.*
+/aur/*/*.tar.gz
+/aur/*/LICENSE-*
+/aur/*/README-*

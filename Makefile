@@ -2,7 +2,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 CC ?= gcc
 PKG_CONFIG ?= pkg-config
-VERSION ?= 0.2.0
+VERSION ?= 0.3.0
 
 BUILDDIR := build
 DISTDIR := dist
@@ -26,7 +26,7 @@ endif
 CPPFLAGS += $(JSON_CFLAGS)
 LDLIBS += $(JSON_LIBS)
 
-SRCS := src/main.c src/ipc.c src/apps.c src/proc.c src/action.c src/config.c
+SRCS := src/main.c src/ipc.c src/session.c src/proc.c src/action.c src/config.c
 OBJS := $(patsubst src/%.c,$(BUILDDIR)/%.o,$(SRCS))
 
 .PHONY: all clean install uninstall
