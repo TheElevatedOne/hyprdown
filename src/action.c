@@ -1,6 +1,7 @@
 #include "hyprdown.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +14,13 @@
 #include <systemd/sd-bus.h>
 #endif
 
+/* Ignored signals survive exec; children must not inherit ours. */
+static void reset_signals(void) {
+    signal(SIGHUP, SIG_DFL);
+    signal(SIGPIPE, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
+}
+
 static int run_argv(char *const argv[]) {
     pid_t pid = fork();
     if (pid < 0) {
@@ -20,10 +28,7 @@ static int run_argv(char *const argv[]) {
         return -1;
     }
     if (pid == 0) {
-        /* Ignored signals survive exec; the action must not inherit ours. */
-        signal(SIGHUP, SIG_DFL);
-        signal(SIGPIPE, SIG_DFL);
-        signal(SIGTERM, SIG_DFL);
+        reset_signals();
         execvp(argv[0], argv);
         fprintf(stderr, "hyprdown: exec %s: %s\n", argv[0], strerror(errno));
         _exit(127);
@@ -196,4 +201,49 @@ int run_action(enum Action action, const char *command, const struct Config *cfg
     }
 
     return -1;
+}
+
+/* systemd reports "stopping" once a power off, reboot or halt is under way.
+ * The desktop can stay up for a while after that, and logind refuses any new
+ * request because polkit is already stopped. */
+int system_shutting_down(void) {
+    char buf[64];
+    size_t len = 0;
+    int fds[2];
+
+    if (pipe2(fds, O_CLOEXEC) < 0)
+        return 0;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return 0;
+    }
+    if (pid == 0) {
+        int null_fd = open("/dev/null", O_WRONLY);
+        reset_signals();
+        dup2(fds[1], STDOUT_FILENO);
+        if (null_fd >= 0)
+            dup2(null_fd, STDERR_FILENO);
+        execlp("systemctl", "systemctl", "is-system-running", (char *)NULL);
+        _exit(127);
+    }
+
+    close(fds[1]);
+    while (len < sizeof(buf) - 1) {
+        ssize_t n = read(fds[0], buf + len, sizeof(buf) - 1 - len);
+        if (n < 0 && errno == EINTR)
+            continue;
+        if (n <= 0)
+            break;
+        len += (size_t)n;
+    }
+    close(fds[0]);
+    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+        ;
+
+    buf[len] = '\0';
+    buf[strcspn(buf, "\n")] = '\0';
+    return strcmp(buf, "stopping") == 0;
 }

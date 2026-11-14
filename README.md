@@ -10,9 +10,9 @@ hyprdown -s    # close everything, then power off
 
 ## How it works
 
-1. **Collect**: client windows (`j/clients`), layer-shell clients such as bars and wallpapers (`j/layers`), and direct children of the compositor.
+1. **Collect**: client windows (`j/clients`), layer-shell clients such as bars and wallpapers (`j/layers`), direct children of the compositor, and apps running as systemd `app-*` units. That last group covers apps started through [uwsm](https://github.com/Vladimir-csp/uwsm) or app2unit, XDG autostart, Flatpak, and Chromium-based apps. For those units only the app's own process is collected; its helpers and a terminal's shells are left to the app.
 2. **Close windows**: each window is asked to close through `hl.dsp.window.close`, and again every second while it stays open. Windows that appear during the shutdown are closed too.
-3. **SIGTERM**: a process gets one SIGTERM once it has no windows left. An app that had windows gets 1 second to exit by itself first.
+3. **SIGTERM**: a process gets one SIGTERM once neither it nor anything it started has a window left. An app that had windows gets 1 second to exit by itself first.
 4. **Timeout**: whatever is still running after the timeout (5 seconds by default) gets SIGTERM, then SIGKILL 1 second later.
 5. **Action**: Hyprland is exited, or the action you asked for runs. With an action, Hyprland is not exited first.
 
@@ -104,6 +104,8 @@ logout_override = "loginctl terminate-session $XDG_SESSION_ID"
 Empty override strings are ignored. If the config is invalid, hyprdown shows a Hyprland notification and closes nothing.
 
 ## Troubleshooting
+
+If the system is already shutting down, for example because the desktop is still up while a reboot finishes, hyprdown closes nothing and shows an info notification instead.
 
 A detached run logs to `$XDG_STATE_HOME/hyprdown/hyprdown.log`, or `$HOME/.local/state/hyprdown/hyprdown.log`. The file is replaced on every run and survives a reboot. If the action fails after apps were closed, you also get a Hyprland notification.
 

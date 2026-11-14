@@ -2,7 +2,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 CC ?= gcc
 PKG_CONFIG ?= pkg-config
-VERSION ?= 0.3.0
+VERSION ?= 0.3.1
 
 BUILDDIR := build
 DISTDIR := dist

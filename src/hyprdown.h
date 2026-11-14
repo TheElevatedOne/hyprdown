@@ -5,7 +5,7 @@
 #include <sys/types.h>
 
 #ifndef HYPRDOWN_VERSION
-#define HYPRDOWN_VERSION "0.3.0"
+#define HYPRDOWN_VERSION "0.3.1"
 #endif
 
 #define HYPRDOWN_DEFAULT_TIMEOUT 5
@@ -99,6 +99,7 @@ int hypr_compositor_pid(pid_t *out_pid);
 char *hypr_close_window(const char *address, int use_lua);
 int hypr_exit(int use_lua);
 void hypr_notify_error(const char *message);
+void hypr_notify_info(const char *message);
 
 /* session: collect, close and wait for apps */
 int session_collect(struct Session *s);
@@ -108,9 +109,11 @@ void session_free(struct Session *s);
 
 /* power / session actions */
 int run_action(enum Action action, const char *command, const struct Config *cfg);
+int system_shutting_down(void);
 
 /* process helpers */
 int proc_info(pid_t pid, struct ProcInfo *out);
 int proc_collect_children(pid_t parent, pid_t *out, size_t cap);
+int proc_collect_app_units(pid_t *out, size_t cap);
 
 #endif

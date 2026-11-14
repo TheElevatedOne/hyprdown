@@ -5,29 +5,16 @@ import ctypes
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
 import time
 
-DUMMY = r"""
-import ctypes, os, signal, sys, time
-name, mode, out = sys.argv[1:4]
-ctypes.CDLL(None).prctl(15, name.encode(), 0, 0, 0)
-def on_term(*_):
-    with open(os.path.join(out, "events"), "a") as f:
-        f.write(f"{time.monotonic()} term {name}\n")
-    if mode != "ignore-term":
-        os._exit(0)
-signal.signal(signal.SIGTERM, on_term)
-open(os.path.join(out, f"{name}.ready"), "w").close()
-while True:
-    time.sleep(60)
-"""
-
 base, out = sys.argv[1], sys.argv[2]
 scenario = json.loads(sys.argv[3])
 ctypes.CDLL(None).prctl(15, b"Hyprland", 0, 0, 0)
+DUMMY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dummy_app.py")
 
 
 def event(text):
@@ -35,35 +22,56 @@ def event(text):
         f.write(f"{time.monotonic()} {text}\n")
 
 
-def spawn(name, mode="normal"):
-    proc = subprocess.Popen([sys.executable, "-I", "-c", DUMMY, name, mode, out])
+def wait_ready(name):
     while not os.path.exists(os.path.join(out, f"{name}.ready")):
         time.sleep(0.01)
-    with open(os.path.join(out, f"{name}.pid"), "w") as f:
-        f.write(str(proc.pid))
-    return proc
+    with open(os.path.join(out, f"{name}.pid")) as f:
+        return int(f.read())
+
+
+def spawn(name, mode="normal"):
+    subprocess.Popen([sys.executable, "-I", DUMMY, name, mode, out])
+    return wait_ready(name)
+
+
+def alive(pid):
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] not in "ZX"
+    except FileNotFoundError:
+        return False
+
+
+def kill(pid):
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 windows = {}
 next_address = [0x1000]
 
 
-def add_window(name, kind, proc, title=None):
+def add_window(name, kind, pid, title=None):
     address = hex(next_address[0])
     next_address[0] += 0x10
-    windows[address] = {"name": name, "kind": kind, "proc": proc, "title": title or name, "closes": 0}
+    windows[address] = {"name": name, "kind": kind, "pid": pid, "title": title or name}
 
 
-keep = []
 layers = []
 for app in scenario.get("windows", []):
-    add_window(app["name"], app["kind"], spawn(app["name"], app.get("mode", "normal")), app.get("title"))
+    if "launcher" in app:
+        # The window belongs to a child of the launcher, like Steam's webhelper.
+        spawn(app["launcher"], "parent:" + app["name"])
+        pid = wait_ready(app["name"])
+    else:
+        pid = spawn(app["name"], app.get("mode", "normal"))
+    add_window(app["name"], app["kind"], pid, app.get("title"))
 for name in scenario.get("layers", []):
-    proc = spawn(name)
-    keep.append(proc)
-    layers.append(proc)
+    layers.append(spawn(name))
 for app in scenario.get("children", []):
-    keep.append(spawn(app["name"], app.get("mode", "normal")))
+    spawn(app["name"], app.get("mode", "normal"))
 
 directory = os.path.join(base, "hypr", "test")
 os.makedirs(directory)
@@ -76,30 +84,32 @@ open(os.path.join(out, "fake.ready"), "w").close()
 
 
 def prune():
-    for address in [a for a, w in windows.items() if w["proc"].poll() is not None]:
-        del windows[address]
+    for address, window in list(windows.items()):
+        if window["kind"] == "closing" and time.monotonic() >= window["close_at"]:
+            kill(window["pid"])
+        if not alive(window["pid"]):
+            del windows[address]
 
 
 def close_window(address):
     window = windows.get(address)
     if not window:
         return "ok"
-    window["closes"] += 1
     event(f"close {window['name']}")
     kind = window["kind"]
     if kind == "normal":
-        window["proc"].kill()
-        window["proc"].wait()
+        kill(window["pid"])
         del windows[address]
     elif kind == "tray":
         del windows[address]
-        keep.append(window["proc"])
     elif kind == "respawn":
-        window["proc"].kill()
-        window["proc"].wait()
+        kill(window["pid"])
         del windows[address]
         name = window["name"] + "-new"
         add_window(name, "normal", spawn(name))
+    elif kind == "slow":
+        window["kind"] = "closing"
+        window["close_at"] = time.monotonic() + 2
     elif kind == "reject":
         return "error: rejected by test"
     return "ok"
@@ -111,10 +121,10 @@ def handle(request):
     if request == "j/status":
         return json.dumps({"configProvider": "lua", "backend": "headless"})
     if request == "j/clients":
-        return json.dumps([{"address": a, "class": w["name"], "title": w["title"], "pid": w["proc"].pid}
+        return json.dumps([{"address": a, "class": w["name"], "title": w["title"], "pid": w["pid"]}
                            for a, w in windows.items()])
     if request == "j/layers":
-        levels = {"0": [{"address": hex(0x9000 + i), "namespace": "layer", "pid": p.pid} for i, p in enumerate(layers)]}
+        levels = {"0": [{"address": hex(0x9000 + i), "namespace": "layer", "pid": p} for i, p in enumerate(layers)]}
         return json.dumps({"HEADLESS-1": {"levels": levels}})
     match = re.fullmatch(r"/dispatch hl\.dsp\.window\.close\(\{ window = 'address:(0x[0-9a-f]+)' \}\)", request)
     if match:

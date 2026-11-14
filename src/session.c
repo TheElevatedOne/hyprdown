@@ -16,6 +16,9 @@
 /* Time an app gets to finish exiting by itself after its last window closed. */
 #define TERM_GRACE 1.0
 #define MAX_CHILDREN 512
+#define MAX_APP_UNITS 1024
+/* How far up the process tree a window's owner is followed. */
+#define MAX_OWNER_DEPTH 32
 
 /* Never signalled, even if they own a window or are compositor children. */
 static const char *const IGNORED_COMMS[] = {
@@ -253,6 +256,18 @@ static void collect_children(struct Session *s) {
         add_proc(s, pids[i]);
 }
 
+/* Apps running as systemd app units (uwsm, app2unit, XDG autostart, Flatpak),
+ * such as tray apps and daemons from exec-once. Missed, they are only stopped
+ * by systemd during the reboot, when the services they talk to may already be
+ * gone, and a hung one keeps the desktop up. */
+static void collect_app_units(struct Session *s) {
+    pid_t pids[MAX_APP_UNITS];
+
+    int n = proc_collect_app_units(pids, MAX_APP_UNITS);
+    for (int i = 0; i < n; i++)
+        add_proc(s, pids[i]);
+}
+
 int session_collect(struct Session *s) {
     struct json_object *clients = fetch_json("j/clients", json_type_array);
     if (!clients) {
@@ -264,6 +279,7 @@ int session_collect(struct Session *s) {
     json_object_put(clients);
     collect_layers(s);
     collect_children(s);
+    collect_app_units(s);
     return 0;
 }
 
@@ -283,13 +299,35 @@ void session_free(struct Session *s) {
     s->nprocs = s->capprocs = 0;
 }
 
-static int pid_in(struct json_object *clients, pid_t pid) {
-    size_t n = clients ? json_object_array_length(clients) : 0;
-    for (size_t i = 0; i < n; i++) {
-        if (json_pid(json_object_array_get_idx(clients, i)) == pid)
+struct PidSet {
+    pid_t *pids;
+    size_t n;
+    size_t cap;
+};
+
+static int pidset_has(const struct PidSet *set, pid_t pid) {
+    for (size_t i = 0; i < set->n; i++) {
+        if (set->pids[i] == pid)
             return 1;
     }
     return 0;
+}
+
+/* Add a window's owner and its ancestors up to the compositor. A process counts
+ * as having windows while anything it started has one: Steam's windows belong
+ * to steamwebhelper, not to the steam process the user launched. */
+static void owners_add(const struct Session *s, struct PidSet *set, pid_t pid) {
+    struct ProcInfo info;
+
+    for (int depth = 0; depth < MAX_OWNER_DEPTH; depth++) {
+        if (pid <= 1 || pid == s->compositor_pid || pidset_has(set, pid))
+            return;
+        set->pids = xgrow(set->pids, &set->cap, set->n, sizeof(*set->pids));
+        set->pids[set->n++] = pid;
+        if (proc_info(pid, &info) < 0 || info.uid != getuid())
+            return;
+        pid = info.ppid;
+    }
 }
 
 static void close_windows(struct Session *s) {
@@ -314,12 +352,16 @@ static void close_windows(struct Session *s) {
 static size_t refresh(struct Session *s) {
     struct json_object *clients = fetch_json("j/clients", json_type_array);
     const double now = monotonic_now();
+    struct PidSet owners = {0};
     size_t remaining = 0;
 
     /* If IPC fails the compositor is going away; its windows go with it. */
     sync_windows(s, clients);
-    for (size_t i = 0; i < s->nwindows; i++)
+    for (size_t i = 0; i < s->nwindows; i++) {
         remaining += s->windows[i].present;
+        if (s->windows[i].present)
+            owners_add(s, &owners, s->windows[i].pid);
+    }
 
     for (size_t i = 0; i < s->nprocs; i++) {
         struct Proc *p = &s->procs[i];
@@ -329,7 +371,8 @@ static size_t refresh(struct Session *s) {
         if (!p->alive)
             continue;
         remaining++;
-        if (pid_in(clients, p->pid)) {
+        if (pidset_has(&owners, p->pid)) {
+            p->had_window = 1;
             p->windows_gone_at = 0;
             continue;
         }
@@ -341,6 +384,7 @@ static size_t refresh(struct Session *s) {
         }
     }
 
+    free(owners.pids);
     if (clients)
         json_object_put(clients);
     return remaining;
@@ -379,6 +423,11 @@ static void print_remaining(const struct Session *s, double left) {
 }
 
 void session_print(const struct Session *s) {
+    struct PidSet owners = {0};
+
+    for (size_t i = 0; i < s->nwindows; i++)
+        owners_add(s, &owners, s->windows[i].pid);
+
     printf("Dispatchers: %s\n", s->use_lua ? "lua" : "legacy");
     if (s->compositor_pid > 0)
         printf("Compositor pid: %d\n", (int)s->compositor_pid);
@@ -399,12 +448,10 @@ void session_print(const struct Session *s) {
     printf("\nProcesses to wait for (%zu):\n", s->nprocs);
     for (size_t i = 0; i < s->nprocs; i++) {
         const struct Proc *p = &s->procs[i];
-        int has_window = 0;
-        for (size_t j = 0; j < s->nwindows && !has_window; j++)
-            has_window = s->windows[j].pid == p->pid;
         printf("  %-8d %-16s %s\n", (int)p->pid, p->name,
-               has_window ? "SIGTERM after its windows close" : "SIGTERM");
+               pidset_has(&owners, p->pid) ? "SIGTERM after its windows close" : "SIGTERM");
     }
+    free(owners.pids);
 }
 
 int session_close(struct Session *s, unsigned timeout_sec) {

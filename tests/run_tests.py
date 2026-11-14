@@ -16,7 +16,14 @@ if os.environ.get("GITHUB_ACTIONS") != "true":
     sys.exit("refusing to run hyprdown outside GitHub Actions")
 
 BINARY = os.path.abspath(sys.argv[1])
-FAKE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_hyprland.py")
+HERE = os.path.dirname(os.path.abspath(__file__))
+FAKE = os.path.join(HERE, "fake_hyprland.py")
+DUMMY = os.path.join(HERE, "dummy_app.py")
+# Stands in for `systemctl is-system-running`; the state comes from a file.
+SYSTEMCTL = """#!/bin/sh
+[ "$1" = is-system-running ] || exit 1
+cat "{state}" 2>/dev/null || echo running
+"""
 SAFE_CONFIG = """
 poweroff_override = "echo poweroff > {out}/action"
 reboot_override = "echo reboot > {out}/action"
@@ -38,8 +45,11 @@ class Env:
     def __init__(self, scenario, config=None):
         self.dir = tempfile.mkdtemp(prefix="hyprdown-test-")
         self.out = self.dir
-        for sub in ("config/hyprdown", "state", "run"):
+        for sub in ("config/hyprdown", "state", "run", "bin"):
             os.makedirs(os.path.join(self.dir, sub))
+        with open(self.path("bin/systemctl"), "w") as f:
+            f.write(SYSTEMCTL.format(state=self.path("system-state")))
+        os.chmod(self.path("bin/systemctl"), 0o755)
         with open(os.path.join(self.dir, "config/hyprdown/config.toml"), "w") as f:
             f.write((SAFE_CONFIG if config is None else config).format(out=self.out))
         self.fake = subprocess.Popen(
@@ -47,6 +57,7 @@ class Env:
             start_new_session=True)
         wait_for(lambda: os.path.exists(self.path("fake.ready")), 10, "fake compositor start")
         self.env = dict(os.environ, HYPRLAND_INSTANCE_SIGNATURE="test",
+                        PATH=self.path("bin") + os.pathsep + os.environ["PATH"],
                         XDG_RUNTIME_DIR=os.path.join(self.dir, "run"),
                         XDG_CONFIG_HOME=os.path.join(self.dir, "config"),
                         XDG_STATE_HOME=os.path.join(self.dir, "state"))
@@ -56,6 +67,13 @@ class Env:
 
     def run(self, *args, **kwargs):
         return subprocess.run([BINARY, *args], env=self.env, timeout=30, **kwargs)
+
+    def set_system_state(self, state):
+        with open(self.path("system-state"), "w") as f:
+            f.write(state + "\n")
+
+    def notifications(self, icon):
+        return [e for _, e in self.events() if e.startswith(f"/notify {icon} ")]
 
     def events(self):
         try:
@@ -179,8 +197,77 @@ def test_failed_action_notifies():
     env = Env({"windows": [{"name": "normal", "kind": "normal"}]})
     try:
         env.run("-t", "2", "-c", "exit 3", check=True)
-        wait_for(lambda: any("/notify" in e for _, e in env.events()), 10, "notification")
+        wait_for(lambda: env.notifications(3), 10, "error notification")
     finally:
+        env.cleanup()
+
+
+def test_shutdown_in_progress_closes_nothing():
+    """A second run while a reboot is tearing the session down."""
+    env = Env(APPS)
+    try:
+        env.set_system_state("stopping")
+        env.run("-r", "-t", "2", check=True)
+        wait_for(lambda: env.notifications(1), 10, "info notification")
+        time.sleep(2)
+        require("already shutting down" in env.notifications(1)[0], env.notifications(1))
+        require(not env.notifications(3), "reported an error")
+        require(not any(e.startswith("close ") for _, e in env.events()), "closed windows")
+        require(not dead(env.pid("daemon")), "signalled a process")
+        require(not os.path.exists(env.path("action")), "ran the action")
+    finally:
+        env.cleanup()
+
+
+def test_action_failing_during_shutdown_is_not_an_error():
+    """The system started shutting down while hyprdown was closing apps."""
+    env = Env({"windows": [{"name": "normal", "kind": "normal"}]},
+              config=f'reboot_override = "echo stopping > {{out}}/system-state; touch {{out}}/action; exit 1"\n')
+    try:
+        env.run("-r", "-t", "2", check=True)
+        wait_for(lambda: os.path.exists(env.path("action")), 10, "action")
+        time.sleep(1)
+        require(not env.notifications(3), "reported an error during a shutdown")
+        require("already shutting down" in env.log(), env.log())
+    finally:
+        env.cleanup()
+
+
+def test_launcher_waits_for_child_window():
+    """Steam's window belongs to steamwebhelper, a child of the steam process."""
+    env = Env({"windows": [{"name": "webhelper", "kind": "slow", "launcher": "launcher"}]})
+    try:
+        env.run("-t", "4", "-c", f"touch {env.out}/action", check=True)
+        wait_for(lambda: os.path.exists(env.path("action")), 15, "action")
+        require(env.times("term launcher"), "launcher never got SIGTERM")
+        require(env.times("term launcher")[0] - env.times("close webhelper")[0] >= 0.9,
+                "launcher was terminated while its child still had a window")
+    finally:
+        env.cleanup()
+
+
+def test_app_units():
+    """Apps uwsm and app2unit start as app-*.scope units, outside the compositor."""
+    if os.environ.get("HYPRDOWN_TEST_USER_SYSTEMD") != "1":
+        raise AssertionError("needs a user systemd instance, see the workflow")
+    env = Env({"windows": [{"name": "normal", "kind": "normal"}]})
+    unit = f"app-hyprdowntest-{os.getpid()}.scope"
+    try:
+        subprocess.Popen(["systemd-run", "--user", "--scope", "--quiet", f"--unit={unit}",
+                          "--slice=app-graphical.slice", sys.executable, "-I", DUMMY,
+                          "tray-unit", "parent:unit-child", env.out])
+        wait_for(lambda: os.path.exists(env.path("tray-unit.ready")) and os.path.exists(env.path("unit-child.ready")),
+                 10, "app unit start")
+        out = env.run("-n", stdout=subprocess.PIPE, text=True, check=True).stdout
+        require("tray-unit" in out, f"app unit missing from dry run: {out}")
+        require("unit-child" not in out, f"child of an app unit listed: {out}")
+
+        env.run("-t", "2", "-c", f"touch {env.out}/action", check=True)
+        wait_for(lambda: os.path.exists(env.path("action")), 15, "action")
+        require(env.times("term tray-unit"), "app unit was not terminated")
+        require(not env.times("term unit-child"), "child of an app unit was signalled directly")
+    finally:
+        subprocess.run(["systemctl", "--user", "kill", "--signal=KILL", unit], stderr=subprocess.DEVNULL)
         env.cleanup()
 
 
@@ -190,7 +277,7 @@ def test_invalid_config_closes_nothing():
         result = env.run("-s", stderr=subprocess.DEVNULL)
         require(result.returncode == 1, f"exit {result.returncode}")
         require(not env.times("close normal"), "closed windows with a broken config")
-        require(any("/notify" in e for _, e in env.events()), "no notification")
+        require(env.notifications(3), "no error notification")
     finally:
         env.cleanup()
 

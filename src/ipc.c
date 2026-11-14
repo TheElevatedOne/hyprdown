@@ -266,13 +266,18 @@ int hypr_exit(int use_lua) {
     return -1;
 }
 
-/* hyprdown usually runs from a keybind or menu, where stderr goes nowhere. */
-void hypr_notify_error(const char *message) {
+/* hyprdown usually runs from a keybind or menu, where stderr goes nowhere.
+ * Icons: 1 is info, 3 is error. */
+static void hypr_notify(int icon, const char *message) {
     char *cmd = NULL;
 
     fprintf(stderr, "hyprdown: %s\n", message);
-    if (asprintf(&cmd, "/notify 3 10000 0 hyprdown: %s", message) < 0)
+    if (asprintf(&cmd, "/notify %d 10000 0 hyprdown: %s", icon, message) < 0)
         return;
     free(hypr_request(cmd, NULL));
     free(cmd);
 }
+
+void hypr_notify_error(const char *message) { hypr_notify(3, message); }
+
+void hypr_notify_info(const char *message) { hypr_notify(1, message); }

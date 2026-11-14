@@ -275,6 +275,17 @@ int main(int argc, char **argv) {
         log_start(&opt);
     }
 
+    /* Typically a second run because the desktop is still up while a reboot
+     * tears the session down. That reboot will finish without our help. */
+    if (system_shutting_down()) {
+        if (opt.dry_run)
+            printf("The system is already shutting down; hyprdown would do nothing.\n");
+        else
+            hypr_notify_info("the system is already shutting down, nothing to do");
+        config_free(&cfg);
+        return 0;
+    }
+
     session.use_lua = hypr_detect_lua();
 
     if (session_collect(&session) < 0) {
@@ -302,8 +313,12 @@ int main(int argc, char **argv) {
         if (hypr_exit(session.use_lua) < 0)
             rc = 1;
     } else if (run_action(opt.action, opt.command, &cfg) != 0) {
-        hypr_notify_error("apps were closed, but the action failed; see hyprdown.log");
-        rc = 1;
+        if (system_shutting_down()) {
+            fprintf(stderr, "hyprdown: the system is already shutting down\n");
+        } else {
+            hypr_notify_error("apps were closed, but the action failed; see hyprdown.log");
+            rc = 1;
+        }
     }
 
     config_free(&cfg);

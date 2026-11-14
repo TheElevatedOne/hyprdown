@@ -18,7 +18,18 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc make pkg-config libjson-c-dev libsystemd-dev
+          sudo apt-get install -y --no-install-recommends gcc make pkg-config libjson-c-dev libsystemd-dev dbus-user-session
+
+      # For the app unit test: apps under uwsm or app2unit run as app-*.scope units.
+      - name: Start a user systemd instance
+        run: |
+          sudo loginctl enable-linger "$USER"
+          runtime="/run/user/$(id -u)"
+          for _ in $(seq 100); do [ -S "$runtime/bus" ] && break; sleep 0.2; done
+          XDG_RUNTIME_DIR="$runtime" systemctl --user is-system-running --wait || true
+          echo "XDG_RUNTIME_DIR=$runtime" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus" >> "$GITHUB_ENV"
+          echo "HYPRDOWN_TEST_USER_SYSTEMD=1" >> "$GITHUB_ENV"
 
       - name: Build
         run: make CFLAGS="-O2 -g -Werror"
